@@ -18,28 +18,27 @@
 
 package org.apache.phoenix.pherf;
 
-import org.apache.phoenix.pherf.util.PhoenixUtil;
+import org.apache.phoenix.pherf.result.ResultUtil;
 import org.junit.BeforeClass;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
-import java.net.URISyntaxException;
-import java.net.URL;
-import java.nio.file.Path;
-import java.nio.file.Paths;
+import java.util.Properties;
 
-import static org.junit.Assert.assertNotNull;
-
-public class BaseTestWithCluster {
-    static final String matcherScenario = PherfConstants.SCENARIO_ROOT_PATTERN + ".xml";
-    private static final Logger logger = LoggerFactory.getLogger(BaseTestWithCluster.class);
-    protected static PhoenixUtil util;
+public class ResultBaseTest {
+    private static boolean isSetUpDone = false;
 
     @BeforeClass
-    public static void initQuorum() {
-        util = new PhoenixUtil();
-        String zookeeper = ((System.getProperty("ZK_QUORUM") == null) || System.getProperty("ZK_QUORUM").equals("")) ? "localhost" : System.getProperty("ZK_QUORUM");
-        PhoenixUtil.setZookeeper(zookeeper);
-        logger.info("Using quorum:" + zookeeper);
+    public static void setUp() throws Exception {
+        if (isSetUpDone) {
+            return;
+        }
+
+        ResultUtil util = new ResultUtil();
+        PherfConstants constants = PherfConstants.create();
+        Properties properties = constants.getProperties(PherfConstants.PHERF_PROPERTIES);
+        String dir = properties.getProperty("pherf.default.results.dir");
+        String targetDir = "target/" + dir;
+        properties.setProperty("pherf.default.results.dir", targetDir);
+        util.ensureBaseDirExists(targetDir);
+        isSetUpDone = true;
     }
 }

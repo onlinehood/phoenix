@@ -20,9 +20,9 @@
 ############################################################################
 
 #
-# Script to handle daemonizing the query server process.
+# Script to handle launching the query server process.
 #
-# usage: queryserver.py [start|stop] [-Dhadoop=configs]
+# usage: queryserver.py [start|stop|makeWinServiceDesc] [-Dhadoop=configs]
 #
 
 import datetime
@@ -34,7 +34,13 @@ import subprocess
 import sys
 import tempfile
 
-import daemon
+try:
+    import daemon
+    daemon_supported = True
+except ImportError:
+    # daemon script not supported on some platforms (windows?)
+    daemon_supported = False
+
 import phoenix_utils
 
 phoenix_utils.setPath()
@@ -47,6 +53,8 @@ if len(args) > 1:
         command = 'start'
     elif args[1] == 'stop':
         command = 'stop'
+    elif args[1] == 'makeWinServiceDesc':
+        command = 'makeWinServiceDesc'
 if command:
     args = args[2:]
 
@@ -58,7 +66,7 @@ else:
 
 # HBase configuration folder path (where hbase-site.xml reside) for
 # HBase/Phoenix client side property override
-hbase_config_path = os.getenv('HBASE_CONF_DIR', phoenix_utils.hbase_conf_path)
+hbase_config_path = phoenix_utils.hbase_conf_dir
 
 # default paths ## TODO: add windows support
 java_home = os.getenv('JAVA_HOME')
@@ -68,12 +76,24 @@ phoenix_file_basename = 'phoenix-%s-server' % getpass.getuser()
 phoenix_log_file = '%s.log' % phoenix_file_basename
 phoenix_out_file = '%s.out' % phoenix_file_basename
 phoenix_pid_file = '%s.pid' % phoenix_file_basename
+opts = os.getenv('PHOENIX_QUERYSERVER_OPTS', '')
 
-# load hbase-env.sh to extract JAVA_HOME, HBASE_PID_DIR, HBASE_LOG_DIR
-hbase_env_path = os.path.join(hbase_config_path, 'hbase-env.sh')
+# load hbase-env.??? to extract JAVA_HOME, HBASE_PID_DIR, HBASE_LOG_DIR
+hbase_env_path = None
+hbase_env_cmd  = None
+if os.name == 'posix':
+    hbase_env_path = os.path.join(hbase_config_path, 'hbase-env.sh')
+    hbase_env_cmd = ['bash', '-c', 'source %s && env' % hbase_env_path]
+elif os.name == 'nt':
+    hbase_env_path = os.path.join(hbase_config_path, 'hbase-env.cmd')
+    hbase_env_cmd = ['cmd.exe', '/c', 'call %s & set' % hbase_env_path]
+if not hbase_env_path or not hbase_env_cmd:
+    print >> sys.stderr, "hbase-env file unknown on platform %s" % os.name
+    sys.exit(-1)
+
 hbase_env = {}
 if os.path.isfile(hbase_env_path):
-    p = subprocess.Popen(['bash', '-c', 'source %s && env' % hbase_env_path], stdout = subprocess.PIPE)
+    p = subprocess.Popen(hbase_env_cmd, stdout = subprocess.PIPE)
     for x in p.stdout:
         (k, _, v) = x.partition('=')
         hbase_env[k.strip()] = v.strip()
@@ -84,6 +104,8 @@ if hbase_env.has_key('HBASE_PID_DIR'):
     hbase_pid_dir = hbase_env['HBASE_PID_DIR']
 if hbase_env.has_key('HBASE_LOG_DIR'):
     phoenix_log_dir = hbase_env['HBASE_LOG_DIR']
+if hbase_env.has_key('PHOENIX_QUERYSERVER_OPTS'):
+    opts = hbase_env['PHOENIX_QUERYSERVER_OPTS']
 
 log_file_path = os.path.join(phoenix_log_dir, phoenix_log_file)
 out_file_path = os.path.join(phoenix_log_dir, phoenix_out_file)
@@ -102,9 +124,27 @@ java_cmd = '%(java)s -cp ' + hbase_config_path + os.pathsep + phoenix_utils.phoe
     " -Dpsql.root.logger=%(root_logger)s" + \
     " -Dpsql.log.dir=%(log_dir)s" + \
     " -Dpsql.log.file=%(log_file)s" + \
+    " " + opts + \
     " org.apache.phoenix.queryserver.server.Main " + args
 
+if command == 'makeWinServiceDesc':
+    cmd = java_cmd % {'java': java, 'root_logger': 'INFO,DRFA,console', 'log_dir': phoenix_log_dir, 'log_file': phoenix_log_file}
+    slices = cmd.split(' ')
+
+    print "<service>"
+    print "  <id>queryserver</id>"
+    print "  <name>Phoenix Query Server</name>"
+    print "  <description>This service runs the Phoenix Query Server.</description>"
+    print "  <executable>%s</executable>" % slices[0]
+    print "  <arguments>%s</arguments>" % ' '.join(slices[1:])
+    print "</service>"
+    sys.exit()
+
 if command == 'start':
+    if not daemon_supported:
+        print >> sys.stderr, "daemon mode not supported on this platform"
+        sys.exit(-1)
+
     # run in the background
     d = os.path.dirname(out_file_path)
     if not os.path.exists(d):
@@ -133,9 +173,17 @@ if command == 'start':
             sys.exit(child.wait())
 
 elif command == 'stop':
-    if not os.path.isfile(out_file_path):
+    if not daemon_supported:
+        print >> sys.stderr, "daemon mode not supported on this platform"
+        sys.exit(-1)
+
+    if not os.path.exists(pid_file_path):
         print >> sys.stderr, "no Query Server to stop because PID file not found, %s" % pid_file_path
         sys.exit(0)
+
+    if not os.path.isfile(pid_file_path):
+        print >> sys.stderr, "PID path exists but is not a file! %s" % pid_file_path
+        sys.exit(1)
 
     pid = None
     with open(pid_file_path, 'r') as p:

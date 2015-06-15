@@ -38,7 +38,7 @@ import javax.xml.bind.Marshaller;
 
 import static org.junit.Assert.*;
 
-public class ConfigurationParserTest {
+public class ConfigurationParserTest extends ResultBaseTest{
     private static final Logger logger = LoggerFactory.getLogger(ConfigurationParserTest.class);
 
     @Test
@@ -84,7 +84,7 @@ public class ConfigurationParserTest {
             Scenario scenario = scenarioList.get(0);
             assertNotNull(scenario);
             assertEquals("PHERF.TEST_TABLE", scenario.getTableName());
-            assertEquals(50, scenario.getRowCount());
+            assertEquals(10, scenario.getRowCount());
             assertEquals(1, scenario.getDataOverride().getColumn().size());
             QuerySet qs = scenario.getQuerySet().get(0);
             assertEquals(ExecutionType.SERIAL, qs.getExecutionType());
